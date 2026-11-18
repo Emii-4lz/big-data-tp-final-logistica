@@ -1,11 +1,11 @@
 import duckdb
-import pandas as pd
 from pathlib import Path
-from airflow.sdk import task
+import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent
 CONSULTAS_DIR = BASE_DIR / "consultas"
-DATOS_DIR = BASE_DIR / "datos" / "envios.csv"
+CSV_PATH = BASE_DIR / "datos" / "envios.csv"
+DB_PATH = BASE_DIR / "pipeline.duckdb"
 
 ver_base_de_datos = pd.read_csv("datos/envios.csv")
 # Las revisiones que llevé acabo (Emi):
@@ -13,7 +13,6 @@ ver_base_de_datos = pd.read_csv("datos/envios.csv")
 # print(ver_base_de_datos.isna().sum()) - 153 nulos en dias_entrega
 # print(ver_base_de_datos.min()) - El minimo de peso_kg es -39.43
 # print(ver_base_de_datos.nunique())
-
 
 def read_sql(filename: str):
     try:
@@ -25,73 +24,67 @@ def read_sql(filename: str):
 
 
 def count(con, table):
-    try:
-        return con.execute(f"""
-        SELECT COUNT(*) FROM {table}
-        """)
-    except Exception as e:
-        raise e
+    return con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
-@task
 def extract():
     try:
         print("------ EXTRAYENDO ------")
-        con = duckdb.connect("pipeline.duckdb")
-        con.execute(read_sql(filename="extract.sql"), [str(DATOS_DIR / "envios.csv")])
-        print("Valores extraidos: ", count(con, "envios_raw"))
+        con = duckdb.connect(str(DB_PATH))
+        con.execute(read_sql("extract.sql"), [str(CSV_PATH)])
+        print("Valores extraidos: ", count(con, "raw_envios"))
+        con.close()
     except Exception as e:
         raise e
 
 
-@task
 def validate():
     try:
         print("------ VALIDANDO ------")
-        con = duckdb.connect("pipeline.duckdb")
-        con.execute(read_sql(filename="validar.sql"))
-
-        print("Valores rechazados: ", count(con, "rechazados"))
+        con = duckdb.connect(str(DB_PATH))
+        con.execute(read_sql("validar.sql"))
         print("Valores validos: ", count(con, "validos"))
+        print("Valores rechazados: ", count(con, "rechazados"))
+        print("Rechazos por regla:")
+        filas = con.execute("""
+            SELECT motivo_rechazo, COUNT(*) FROM rechazados
+            GROUP BY motivo_rechazo ORDER BY COUNT(*) DESC
+        """).fetchall()
+        for motivo, cantidad in filas:
+            print("   ", motivo, ":", cantidad)
+        con.close()
     except Exception as e:
         raise e
 
 
-@task
-def transform():
+def limpiar():
     try:
-        print("------ TRANSFORMANDO Y LIMPIANDO ------")
-        con = duckdb.connect("pipeline.duckdb")
-        con.execute(read_sql(filename="limpiar.sql"))
+        print("------ LIMPIANDO ------")
+        con = duckdb.connect(str(DB_PATH))
+        con.execute(read_sql("limpiar.sql"))
         print("Valores rechazados limpios: ", count(con, "rechazados_limpios"))
-
-        con.execute(read_sql(filename="unir.sql"))
-        print("Valores en tabla final: ", count(con, "tabla_final"))
+        con.close()
     except Exception as e:
         raise e
 
 
-@task
-def export():
+def unir():
     try:
-        print("------ EXPORTANDO DATOS . . . ------")
-        con = duckdb.connect("pipeline.duckdb")
-        df = con.execute("SELECT * FROM tabla_final").df()
-        df.to_parquet(str("envios_final.parquet"))
+        print("------ UNIENDO ------")
+        con = duckdb.connect(str(DB_PATH))
+        con.execute(read_sql("unir.sql"))
+        print("Valores en tabla final: ", count(con, "tabla_final"))
+        unicos = con.execute("SELECT COUNT(DISTINCT id_envio) FROM tabla_final").fetchone()[0]
+        print("Ids unicos en tabla final: ", unicos)
+        con.close()
     except Exception as e:
         raise e
-
 
 def main():
-    try:
-        extraction = extract()
-        validation = validate()
-        transforms = transform()
-        exports = export()
-
-        extraction >> validation >> transforms >> exports
-    except Exception as e:
-        print("Error al procesar los datos ", e)
+    extract()
+    validate()
+    limpiar()
+    unir()
 
 
 if __name__ == "__main__":

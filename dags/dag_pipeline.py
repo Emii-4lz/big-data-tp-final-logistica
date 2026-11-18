@@ -1,7 +1,7 @@
-from datetime import datetime
+import pendulum
 from pathlib import Path
 import duckdb
-from airflow.sdk import DAG, task
+from airflow.sdk import dag, task
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONSULTAS_DIR = BASE_DIR / "consultas"
@@ -17,9 +17,9 @@ def count(con, table):
     return con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
-@DAG(
+@dag(
     dag_id="pipeline_envios_etl",
-    start_date=datetime(2026, 1, 1),
+    start_date=pendulum.datetime(2026, 1, 1, tz="America/Argentina/Buenos_Aires"),
     schedule="0 2 * * *",
     catchup=False,
 )
@@ -27,33 +27,34 @@ def dag_pipeline():
     @task
     def extract():
         con = duckdb.connect(str(DB_PATH))
-        con.execute(read_sql(filename="extract.sql"), [str(DATOS_DIR / "ventas.csv")])
-        print("Valores extraidos: ", count(con, "envios_raw"))
+        con.execute(read_sql(filename="extract.sql"), [str(DATOS_DIR / "envios.csv")])
+        print("Valores extraidos: ", count(con, "raw_envios"))
         con.close()
 
     @task
     def validate():
         con = duckdb.connect(str(DB_PATH))
         con.execute(read_sql(filename="validar.sql"))
-        print("Valores validos: ", count(con, "envios_validos"))
+        print("Valores validos: ", count(con, "validos"))
+        print("Valores rechazados: ", count(con, "rechazados"))
         con.close()
 
     @task
-    def transform():
+    def limpiar():
         con = duckdb.connect(str(DB_PATH))
         con.execute(read_sql(filename="limpiar.sql"))
+        print("Valores rechazados limpios: ", count(con, "rechazados_limpios"))
+        con.close()
+
+    @task
+    def unir():
+        con = duckdb.connect(str(DB_PATH))
         con.execute(read_sql(filename="unir.sql"))
         print("Valores en tabla final: ", count(con, "tabla_final"))
         con.close()
 
-    @task
-    def export():
-        con = duckdb.connect(str(DB_PATH))
-        df = con.execute("SELECT * FROM tabla_final").df()
-        df.to_parquet(str(BASE_DIR / "output" / "envios_final.parquet"))
-        con.close()
 
-    extract() >> validate() >> transform() >> export()
+    extract() >> validate() >> limpiar() >> unir()
 
 
 dag_instance = dag_pipeline()

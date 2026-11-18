@@ -1,19 +1,35 @@
-CREATE OR REPLACE TABLE rechazados AS
-SELECT *, 'rechazado' AS motivo_rechazo FROM envios_raw WHERE fecha_despacho IS NULL OR TRY_CAST(fecha_despacho AS DATE) IS NULL
-OR fecha_entrega IS NULL OR TRY_CAST(fecha_entrega AS DATE) IS NULL
-OR origen IS NULL OR TRIM(origen) = ''
-OR destino IS NULL OR TRIM(destino) = ''
-OR transportista IS NULL OR TRIM(transportista) = ''
-OR peso_kg IS NULL OR peso_kg <= 0
-OR costo_envio IS NULL OR costo_envio <= 0
-OR dias_entrega IS NULL OR dias_entrega <= 0;
+CREATE OR REPLACE TABLE envios_validacion AS
+SELECT *,
+    CASE
+        WHEN id_envio IS NULL OR TRIM(id_envio) = '' THEN 'id_nulo'
+        WHEN id_envio IN (SELECT id_envio FROM raw_envios GROUP BY id_envio HAVING COUNT(*) > 1)
+            THEN 'id_duplicado'
+        WHEN TRY_CAST(fecha_despacho AS DATE) IS NULL THEN 'fecha_despacho_invalida'
+        WHEN TRY_CAST(fecha_entrega AS DATE) IS NULL THEN 'fecha_entrega_invalida'
+        WHEN TRY_CAST(fecha_entrega AS DATE) < TRY_CAST(fecha_despacho AS DATE)
+            THEN 'entrega_antes_de_despacho'
+        WHEN origen IS NULL OR TRIM(origen) = '' THEN 'origen_vacio'
+        WHEN destino IS NULL OR TRIM(destino) = '' THEN 'destino_vacio'
+        WHEN transportista IS NULL
+            OR transportista NOT IN ('andreani', 'oca', 'correo_argentino', 'mercado_envios')
+            THEN 'transportista_no_permitido'
+        WHEN TRY_CAST(peso_kg AS DOUBLE) IS NULL OR TRY_CAST(peso_kg AS DOUBLE) <= 0
+            THEN 'peso_no_positivo'
+        WHEN TRY_CAST(costo_envio AS DOUBLE) IS NULL OR TRY_CAST(costo_envio AS DOUBLE) <= 0
+            THEN 'costo_invalido'
+        WHEN dias_entrega IS NULL THEN 'dias_entrega_nulo'
+        WHEN dias_entrega <= 0 THEN 'dias_entrega_no_positivo'
+        ELSE NULL
+    END AS motivo_rechazo
+FROM raw_envios;
 
 CREATE OR REPLACE TABLE validos AS
-SELECT * FROM envios_raw WHERE fecha_despacho IS NOT NULL AND TRY_CAST(fecha_despacho AS DATE) IS NOT NULL
-AND fecha_entrega IS NOT NULL AND TRY_CAST(fecha_entrega AS DATE) IS NOT NULL
-AND origen IS NOT NULL AND TRIM(origen) <> ''
-AND destino IS NOT NULL AND TRIM(destino) <> ''
-AND transportista IS NOT NULL AND TRIM(transportista) <> ''
-AND peso_kg IS NOT NULL AND peso_kg > 0
-AND costo_envio IS NOT NULL AND costo_envio > 0
-AND dias_entrega IS NOT NULL AND dias_entrega > 0;
+SELECT id_envio, fecha_despacho, fecha_entrega, origen, destino,
+       transportista, peso_kg, costo_envio, dias_entrega
+FROM envios_validacion
+WHERE motivo_rechazo IS NULL;
+
+CREATE OR REPLACE TABLE rechazados AS
+SELECT *
+FROM envios_validacion
+WHERE motivo_rechazo IS NOT NULL;
