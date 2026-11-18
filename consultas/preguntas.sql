@@ -1,4 +1,4 @@
--- P1: Promedio de dias de entrega por transportista
+-- 1. ¿Cual es el promedio de dias de entrega por transportista?
 SELECT
     transportista,
     ROUND(AVG(dias_entrega), 2) AS promedio_dias_entrega,
@@ -7,7 +7,7 @@ FROM tabla_final
 GROUP BY transportista
 ORDER BY promedio_dias_entrega;
 
--- P2: Costo total de envios por transportista (ARS)
+-- 2. ¿Cual es el costo total de envios por transportista?
 SELECT
     transportista,
     ROUND(SUM(costo_envio), 2) AS costo_total_ars
@@ -15,7 +15,8 @@ FROM tabla_final
 GROUP BY transportista
 ORDER BY costo_total_ars DESC;
 
--- P3: Top 5 rutas con mas envios
+-- 3. ¿Cuales son las 5 rutas (origen -> destino) con mas envios?
+-- (el desempate por nombre hace el resultado estable si hay empates)
 SELECT
     origen,
     destino,
@@ -26,7 +27,7 @@ GROUP BY origen, destino
 ORDER BY cantidad_envios DESC, origen, destino
 LIMIT 5;
 
--- P4: Kilos enviados en total por destino
+-- 4. ¿Cuantos kg se enviaron en total por destino?
 SELECT
     destino,
     ROUND(SUM(peso_kg), 2) AS kg_totales
@@ -34,7 +35,7 @@ FROM tabla_final
 GROUP BY destino
 ORDER BY kg_totales DESC;
 
--- P5: Cantidad de envios entregados en mas de 7 dias
+-- 5. ¿Cuantos envios se entregaron en mas de 7 dias?
 SELECT
     COUNT(*) AS envios_mas_de_7_dias
 FROM tabla_final
